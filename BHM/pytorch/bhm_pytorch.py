@@ -200,3 +200,84 @@ class BHM_PYTORCH():
         std = pt.std(probs, dim=1).squeeze()
 
         return mean, std
+
+      
+      
+def _save_new_weights(weights, opt = 'pick_highest_confidence'):
+    """
+    Determines which mu and sigma should be kept if a hinge point has more than one.
+    Parameters:
+    weights (n,5): x, y, z, mu, sigma for each hinge point evaluation
+    opt (string): 'weight_equally', 'remove_low_confidence', 'pick_highest_confidence', 'pick_first_weight', 'conflate'
+    Returns:
+    kernel_weight (m,5): x, y, z, mu, sigma with each hinge point being unique
+    """
+    weights_dict = {}
+
+    for weight in weights:
+        x1, x2, x3, mu, sig = weight
+        kernel = (x1, x2, x3)
+
+        if kernel in weights_dict:
+            # replace
+            if np.size(weights_dict[kernel]) == 2 and _initial_value(weights_dict[kernel]):
+                weights_dict[kernel] = [mu, sig]
+            elif not _initial_value([mu, sig]):
+                weights_dict[kernel] = np.vstack((weights_dict[kernel], [mu, sig]))
+                # take only last two, by now guaranteed at least two elements
+                
+                # weights_dict[kernel] = weights_dict[kernel][-2:]
+        else:
+            weights_dict[kernel] = [mu, sig]
+
+    kernel_weight = np.empty([0,5], dtype=np.float)
+    for kernel in weights_dict:
+        x1, x2, x3 = kernel
+        params = weights_dict[kernel]
+        
+        # params should not be empty
+        if np.size(params) > 2:
+            num_param = (np.size(params))/2
+
+            if opt == 'weight_equally':
+                mu = sum(params[:,0]) / (num_param)
+                sig = math.sqrt(sum([s**2 for s in params[:,1]]) / (num_param**2))
+            elif opt == 'remove_low_confidence':
+                confident_paras_indx = np.log(params[:,1]) <= 3 #3-4 in log-scale seems to be a good value. visualize sig and see.
+                mu = sum(params[confident_paras_indx,0]) / (num_param)
+                sig = math.sqrt(sum([s**2 for s in params[confident_paras_indx,1]]) / (num_param**2))
+            elif opt == 'pick_highest_confidence':
+                hightest_conf_indx = np.argmin(params[:,1])
+                mu = params[hightest_conf_indx, 0]
+                sig = params[hightest_conf_indx, 1]
+            elif opt == 'pick_first_weight':
+                mu = params[0, 0]
+                sig = params[0, 1]
+            elif opt == 'conflate':
+                max_mu, min_sigma = params[0, 0], params[0,1]
+                valid_mu, valid_sigma = [], []
+                for i in range(0, params.shape[0]):
+                    if params[i, 1] < 11000:
+                        valid_mu.append(params[i,0])
+                        valid_sigma.append(params[i,1])
+
+                    if (np.abs(max_mu) < np.abs(params[i,0])):
+                        max_mu = params[i,0]
+                    min_sigma = min(params[i,1], min_sigma)
+                if (len(valid_mu) > 1):
+                    resultant_mu_nom, resultant_mu_denom, resultant_sigma_denom = 0, 0, 0
+                    for k in range(0, len(valid_mu)):
+                        sigma_squared = valid_sigma[k]**2
+                        resultant_mu_nom += (valid_mu[k])/sigma_squared
+                        resultant_mu_denom += 1/sigma_squared
+                        resultant_sigma_denom += 1/sigma_squared
+                    mu = resultant_mu_nom/resultant_mu_denom
+                    sig = (1/resultant_sigma_denom)
+                else:
+                    mu, sig = max_mu, min_sigma
+            kernel_weight = np.vstack((kernel_weight, [x1, x2, x3, mu, sig]))
+        elif np.size(params) > 0:
+            mu, sig = params
+            kernel_weight = np.vstack((kernel_weight, [x1, x2, x3, mu, sig]))
+
+    return kernel_weight      
