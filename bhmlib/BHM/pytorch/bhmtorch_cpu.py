@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import time
 import sys
 import pandas as pd
-from bhmlib.BHM.pytorch.kernels import RBF
+from .kernels import RBF
 
 # dtype = pt.float32
 # device = pt.device("cpu")
@@ -242,7 +242,7 @@ class BHM2D_PYTORCH():
         return mean, std
 
 class BHM3D_PYTORCH():
-    def __init__(self, gamma=0.05, grid=None, cell_resolution=(5, 5), cell_max_min=None, X=None, nIter=2, mu_sig=None):
+    def __init__(self, gamma=0.05, grid=None, cell_resolution=(5, 5), cell_max_min=None, X=None, nIter=2, mu_sig=None, mu=None, sig=None, epsilon=None, torch_kernel_func=False):
         """
         :param gamma: RBF bandwidth
         :param grid: if there are prespecified locations to hinge the RBF
@@ -257,6 +257,20 @@ class BHM3D_PYTORCH():
             self.grid = self.__calc_grid_auto(cell_resolution, cell_max_min, X)
         self.nIter = nIter
         print(' Number of hinge points={}'.format(self.grid.shape[0]))
+
+        #ADDED
+        if mu_sig is not None:
+            self.mu = pt.tensor(mu_sig[:,0])
+            self.sig = pt.tensor(mu_sig[:,1])
+        else:
+            if mu is not None:
+                self.mu = mu
+            if sig is not None:
+                self.sig = sig
+        self.torch_kernel_func = torch_kernel_func
+        if torch_kernel_func:
+            self.rbf_torch = RBF()
+        
 
     def updateGrid(self, grid):
         self.grid = grid
@@ -280,6 +294,7 @@ class BHM3D_PYTORCH():
             expansion_coef = 1.2
             x_min, x_max = expansion_coef*X[:, 0].min(), expansion_coef*X[:, 0].max()
             y_min, y_max = expansion_coef*X[:, 1].min(), expansion_coef*X[:, 1].max()
+            z_min, z_max = expansion_coef*X[:, 2].min(), expansion_coef*X[:, 2].max()
         else:
             x_min, x_max = max_min[0], max_min[1]
             y_min, y_max = max_min[2], max_min[3]
@@ -297,10 +312,14 @@ class BHM3D_PYTORCH():
         :param X: inputs of size (N,3)
         :return: hinged features with intercept of size (N, # of features + 1)
         """
-        rbf_features = rbf_kernel(X, self.grid, gamma=self.gamma)
-
-        # rbf_features = np.hstack((np.ones(X.shape[0])[:, np.newaxis], rbf_features))
-        return pt.tensor(rbf_features)
+        if self.torch_kernel_func:
+            rbf_features, _, _ = self.rbf_torch.eval(X, self.grid, gamma=self.gamma)
+            return rbf_features
+        else:
+            rbf_features = rbf_kernel(X, self.grid, gamma=self.gamma)
+            # COMMENTED OUT BIAS TERM
+            # rbf_features = np.hstack((np.ones(X.shape[0])[:, np.newaxis], rbf_features))
+            return pt.tensor(rbf_features)
 
     def __calc_posterior(self, X, y, epsilon, mu0, sig0):
         """
@@ -313,11 +332,8 @@ class BHM3D_PYTORCH():
         """
         logit_inv = pt.sigmoid(epsilon)
         lam = 0.5 / epsilon * (logit_inv - 0.5)
-
         sig = 1/(1/sig0 + 2*pt.sum( (X.t()**2)*lam, dim=1))
-
         mu = sig*(mu0/sig0 + pt.mm(X.t(), y - 0.5).squeeze())
-
         return mu, sig
 
     def fit(self, X, y):
@@ -374,6 +390,61 @@ class BHM3D_PYTORCH():
         std = pt.std(probs, dim=1).squeeze()
 
         return mean, std
+
+    def log_prob_vacancy(self, Xq):
+        """
+        Log-probability of vacancy, where prob_vacant = 1 - prob_occupied
+        :param Xq: raw in query points
+
+        """
+        prob_Xq = 1. - self.predict(Xq)
+        return pt.log(prob_Xq)
+
+    def grad_log_p_vacancy(self, Xq):
+        """
+        :param Xq: raw in query points
+        """
+        assert self.torch_kernel_func
+        # Use torch kernels with analytic gradients
+        with pt.no_grad():
+            K, dK_dXq, _ = self.rbf_torch.eval(Xq, self.grid, gamma=self.gamma)
+
+        # From predict function
+        K.requires_grad = True
+        mu_a = K.mm(self.mu.reshape(-1, 1)).squeeze()
+        sig2_inv_a = pt.sum((K ** 2) * self.sig, dim=1)
+        k = 1.0 / pt.sqrt(1 + np.pi * sig2_inv_a / 8)
+        log_p = pt.log(1. - pt.sigmoid(k * mu_a))
+
+        # Autodiff second term.
+        dlog_p_dK = pt.autograd.grad(  # batch x rbf_features
+            log_p.sum(),
+            K,
+        )[0]
+
+        # Chain rule gradients
+        dlog_p_dXq = dlog_p_dK.unsqueeze(1) @ dK_dXq
+
+        return dlog_p_dXq.squeeze(1)
+
+    def save(self, save_path=None, filename='bhm.pt'):
+        save_path.mkdir(parents=False, exist_ok=True)
+        params = {
+            'gamma': self.gamma,
+            'grid': self.grid,
+            'mu': self.mu,
+            'sig': self.sig,
+            'nIter': self.nIter,
+        }
+        pt.save(params, save_path / filename)
+
+    def load(self, file_path=None):
+        params_dict = pt.load(file_path)
+        self.gamma = params_dict['gamma']
+        self.grid = params_dict['grid']
+        self.mu = params_dict['mu']
+        self.sig = params_dict['sig']
+        self.nIter = params_dict['nIter']
 
 
 class BHM_FULL_PYTORCH():

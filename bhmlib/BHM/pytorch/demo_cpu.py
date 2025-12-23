@@ -59,14 +59,13 @@ base_path =  Path(__file__).resolve().parents[2]
 # Settings
 # dtype = pt.float32
 device = pt.device("cpu")
-# pt.set_default_tensor_type(pt.FloatTensor)
-pt.set_default_tensor_type(pt.DoubleTensor)
+# pt.set_default_dtype(pt.FloatTensor)
+pt.set_default_dtype(pt.float64)
 # dataset =  'kitti1'
 dataset = 'intel'
-# save_path = base_path / 'Outputs' / 'saved_models'
-save_path = None
-save_iter = 10
-plot_iter = 10
+save_path = Path("./../../Outputs/saved_models/")   # an be None
+save_iter = 100
+plot_iter = 1
 #device = pt.device("cuda:0") # Uncomment this to run on GPU
 
 # Read the file
@@ -91,7 +90,7 @@ for ith_scan in range(0, max_t, skip):
 
     # extract data points of the ith scan
     ith_scan_indx = X_train[:, 0] == ith_scan
-    print('{}th scan:\n  N={}'.format(ith_scan, pt.sum(ith_scan_indx)))
+    print_str = f"{ith_scan}th scan: N={pt.sum(ith_scan_indx)}"
     X_new = X_train[ith_scan_indx, 1:]
     y_new = Y_train[ith_scan_indx]
 
@@ -113,7 +112,9 @@ for ith_scan in range(0, max_t, skip):
         info_val_indx = pt.absolute(q_new - y_new) > thresh
         info_val_indx = info_val_indx.flatten()
         X, y = X_new[info_val_indx, :], y_new[info_val_indx]
-        print('  {:.2f}% points were used.'.format(X.shape[0]/X_new.shape[0]*100))
+        print_str += f" {X.shape[0]/X_new.shape[0]*100:.2f}% points were used"
+
+    print(print_str)
 
     # Fit the model
     t1 = time.time()
@@ -132,32 +133,30 @@ for ith_scan in range(0, max_t, skip):
         yq = bhm_mdl.predict(Xq)
         t4 = time.time()
 
-        print('Fit time: {}'.format(t2 - t1))
-        print('Pred time: {}'.format(t4 - t3))
-        print('iter time: {}\n'.format(t4 - t1))
+        print(f"Fit time: {t2 - t1:.2f} Pred time: {t4 - t3:.2f} iter time: {t4 - t1:.2f} \tPlotting...\n")
 
         Xq = Xq.cpu().numpy()
         yq = yq.cpu().numpy()
 
-        print('PLotting...')
         pl.figure(figsize=(13,5))
         pl.subplot(121)
         ones_ = np.where(y==1)
         # pl.scatter(X[ones_, 0], X[ones_, 1], c='r', cmap='jet', s=5, edgecolors='')
-        pl.scatter(X[ones_, 0], X[ones_, 1], c='r', cmap='jet', s=5)
+        pl.scatter(X[ones_, 0], X[ones_, 1], c=np.ones(np.shape(ones_)), cmap='jet', s=5, vmin=0, vmax=1)
         pl.title('Laser hit points at t={}'.format(ith_scan))
         pl.xlim([cell_max_min[0], cell_max_min[1]]); pl.ylim([cell_max_min[2], cell_max_min[3]])
         pl.subplot(122)
         pl.title('SBHM at t={}'.format(ith_scan))
         # pl.scatter(Xq[:, 0], Xq[:, 1], c=yq, cmap='jet', s=10, marker='8',edgecolors='')
-        pl.scatter(Xq[:, 0], Xq[:, 1], c=yq, cmap='jet', s=10, marker='8',)
+        pl.scatter(Xq[:, 0], Xq[:, 1], c=yq, cmap='jet', s=10, marker='8', vmin=0, vmax=1)
         # pl.scatter(Xq[:, 0], Xq[:, 1], cmap='jet', marker='8',edgecolors='')
         # pl.scatter(Xq[:, 0], Xq[:, 1])
         #pl.imshow(Y_query.reshape(xx.shape))
         pl.colorbar()
         pl.xlim([cell_max_min[0], cell_max_min[1]]); pl.ylim([cell_max_min[2], cell_max_min[3]])
         # pl.savefig('Output/step' + str(ith_scan) + '.png', bbox_inches='tight')
-        pl.savefig(os.path.abspath('../../Outputs/intel_{:03d}.png'.format(ith_scan)), bbox_inches='tight')
+        pl.savefig(os.path.abspath('../../Outputs/images/intel_{:03d}.png'.format(ith_scan)), bbox_inches='tight')
+        pl.close()
 
     if save_path is not None and \
        ith_scan % save_iter == 0:
