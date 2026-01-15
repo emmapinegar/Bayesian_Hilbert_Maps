@@ -273,11 +273,18 @@ class BHM3D_PYTORCH():
         
 
     def updateGrid(self, grid):
-        self.grid = grid
+        if pt.is_tensor(grid):
+            self.grid = grid
+        else:
+            self.grid = pt.tensor(grid)
 
     def updateMuSig(self, mu_sig):
-        self.mu = pt.tensor(mu_sig[:,0])
-        self.sig = pt.tensor(mu_sig[:,1])
+        if pt.is_tensor(mu_sig):
+            self.mu = mu_sig[:,0]
+            self.sig = mu_sig[:,1]
+        else:
+            self.mu = pt.tensor(mu_sig[:,0])
+            self.sig = pt.tensor(mu_sig[:,1])
 
     def __calc_grid_auto(self, cell_resolution, max_min, X):
         """
@@ -417,10 +424,7 @@ class BHM3D_PYTORCH():
         log_p = pt.log(1. - pt.sigmoid(k * mu_a))
 
         # Autodiff second term.
-        dlog_p_dK = pt.autograd.grad(  # batch x rbf_features
-            log_p.sum(),
-            K,
-        )[0]
+        dlog_p_dK = pt.autograd.grad(log_p.sum(), K,)[0] # batch x rbf_features
 
         # Chain rule gradients
         dlog_p_dXq = dlog_p_dK.unsqueeze(1) @ dK_dXq

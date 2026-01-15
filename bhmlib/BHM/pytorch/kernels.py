@@ -60,17 +60,10 @@ class RBF(BaseKernel):
     """
         k(x, x') = exp( - || x - x'||**2 / (2 * ell**2))
     """
-    # def __init__(
-    #     self,
-    # ):
+    # def __init__(self,):
     #     super().__init__()
 
-    def eval(
-            self,
-            X, Y,
-            gamma=None,
-            **kwargs,
-    ):
+    def eval(self, X, Y, gamma=None, **kwargs,):
 
         assert X.shape[-1] == Y.shape[-1]
         dim = X.shape[-1]
@@ -86,11 +79,7 @@ class RBF(BaseKernel):
         K = (- gamma * pw_dists_sq).exp()
         d_K_Xi = K.unsqueeze(2) * diff_XY * 2 * gamma
 
-        return (
-            K,
-            d_K_Xi,
-            pw_dists_sq,
-        )
+        return (K, d_K_Xi, pw_dists_sq,)
 
 #
 # class IMQ(BaseKernel):
