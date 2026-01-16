@@ -95,7 +95,7 @@ class BHM_PYTORCH():
             y_min, y_max = max_min[2], max_min[3]
 
         xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max, cell_resolution[0], device=self.device),
-                              pt.arange(y_min, y_max, cell_resolution[1], device=self.device)])
+                              pt.arange(y_min, y_max, cell_resolution[1], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1)), dim=1).squeeze()
         return grid
     
@@ -122,7 +122,7 @@ class BHM_PYTORCH():
 
         xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max, cell_resolution[0], device=self.device),
                               pt.arange(y_min, y_max, cell_resolution[1], device=self.device),
-                              pt.arange(z_min, z_max, cell_resolution[2], device=self.device)])
+                              pt.arange(z_min, z_max, cell_resolution[2], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1), zz.reshape(-1,1)), dim=1).squeeze()
         return grid
 
