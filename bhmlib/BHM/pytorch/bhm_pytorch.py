@@ -125,9 +125,9 @@ class BHM_PYTORCH():
             # z_min, z_max = z_middle - z_points, z_middle + z_points + cell_resolution[2]
 
             x_expansion, y_expansion, z_expansion = x_range * EXPANSION_COEF, y_range * EXPANSION_COEF, z_range * EXPANSION_COEF
-            x_min, x_max = x_min - x_expansion, x_max + x_expansion
-            y_min, y_max = y_min - y_expansion, y_max + y_expansion
-            z_min, z_max = z_min - z_expansion, z_max + z_expansion
+            x_min, x_max = x_min - x_expansion, x_max + x_expansion + 1
+            y_min, y_max = y_min - y_expansion, y_max + y_expansion + 1
+            z_min, z_max = z_min - z_expansion, z_max + z_expansion + 1
         else:
             x_min, x_max = max_min[0], max_min[1]
             y_min, y_max = max_min[2], max_min[3]
