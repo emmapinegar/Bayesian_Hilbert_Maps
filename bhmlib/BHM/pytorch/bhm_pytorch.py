@@ -27,7 +27,7 @@ VERBOSE = True
 
 
 class BHM_PYTORCH():
-    def __init__(self, gamma=0.05, grid=None, cell_resolution=(5, 5), cell_max_min=None, X=None, nIter=0, mu_sig=None, mu=None, sig=None, epsilon=None, torch_kernel_func=False, device=device_, file=None):
+    def __init__(self, gamma=0.05, grid=None, cell_resolution=(5, 5), cell_max_min=None, X=None, nIter=0, mu_sig=None, mu=None, sig=None, epsilon=None, torch_kernel_func=False, device=device_, file=None, limit_scale=1):
         """
         :param gamma: RBF bandwidth
         :param grid: if there are prespecified locations to hinge the RBF
@@ -37,6 +37,7 @@ class BHM_PYTORCH():
         """
         self.device = device
         self.limits = cell_max_min
+        self.limit_scale = limit_scale
         if file is not None:
             self.load(file)
         else:
@@ -98,8 +99,8 @@ class BHM_PYTORCH():
             x_min, x_max = max_min[0], max_min[1]
             y_min, y_max = max_min[2], max_min[3]
 
-        xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max, cell_resolution[0], device=self.device),
-                              pt.arange(y_min, y_max, cell_resolution[1], device=self.device)], indexing="ij")
+        xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max + cell_resolution[0], cell_resolution[0], device=self.device),
+                              pt.arange(y_min, y_max + cell_resolution[1], cell_resolution[1], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1)), dim=1).squeeze()
         return grid
     
@@ -134,9 +135,9 @@ class BHM_PYTORCH():
 
         print(f"grid points x: {x_min} {x_max} y: {y_min} {y_max} z: {z_min} {z_max}")
 
-        xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max, cell_resolution[0], device=self.device),
-                              pt.arange(y_min, y_max, cell_resolution[1], device=self.device),
-                              pt.arange(z_min, z_max, cell_resolution[2], device=self.device)], indexing="ij")
+        xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max + cell_resolution[0], cell_resolution[0], device=self.device),
+                              pt.arange(y_min, y_max + cell_resolution[1], cell_resolution[1], device=self.device),
+                              pt.arange(z_min, z_max + cell_resolution[2], cell_resolution[2], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1), zz.reshape(-1,1)), dim=1).squeeze()
         return grid
 
@@ -245,15 +246,14 @@ class BHM_PYTORCH():
             # print(self.limits[0][0])
             # print(Xq[0,0])
             print_str = f"log_p: {log_p[0]:5.6f}"
-            
-            scale = 1.
-            log_p_diff = pt.exp(-scale*(Xq[:, 0] - self.limits[0][0]))
-            log_p_diff += pt.exp( scale*(Xq[:, 0] - self.limits[0][1]))
-            log_p_diff += pt.exp(-scale*(Xq[:, 1] - self.limits[1][0]))
-            log_p_diff += pt.exp( scale*(Xq[:, 1] - self.limits[1][1]))
-            if len(self.limits) == 3:
-                log_p_diff += pt.exp(-scale*(Xq[:, 2] - self.limits[2][0]))
-                log_p_diff += pt.exp( scale*(Xq[:, 2] - self.limits[2][1]))            
+
+            log_p_diff = pt.exp(-self.limit_scale*(Xq[:, 0] - self.limits[0][0]))
+            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 0] - self.limits[0][1]))
+            log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 1] - self.limits[1][0]))
+            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 1] - self.limits[1][1]))
+            if len(self.limits) > 2:
+                log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 2] - self.limits[2][0]))
+                log_p_diff += pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1]))            
             print(print_str + f" diff: {log_p_diff[0]:5.6f} new log_p: {log_p[0] - log_p_diff[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}")
             log_p -= log_p_diff
         else:
