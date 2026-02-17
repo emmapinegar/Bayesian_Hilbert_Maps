@@ -45,10 +45,10 @@ class BHM_PYTORCH():
             if grid is not None:
                 self.updateGrid(grid)
             else:
-                if (X is not None and X.shape[1] > 2) or (cell_max_min is not None and len(cell_max_min) > 4):
-                    self.grid = self.__calc_3d_grid_auto(cell_resolution, cell_max_min, X)
+                if (X is not None and X.shape[1] > 2) or (cell_max_min is not None and len(cell_max_min) > 2):
+                    self.grid = self.__calc_3d_grid_auto(cell_resolution, cell_max_min, X, offset_grid=True)
                 else:
-                    self.grid = self.__calc_2d_grid_auto(cell_resolution, cell_max_min, X)
+                    self.grid = self.__calc_2d_grid_auto(cell_resolution, cell_max_min, X, offset_grid=True)
 
             self.nIter = nIter
             if VERBOSE:
@@ -80,7 +80,7 @@ class BHM_PYTORCH():
             self.mu = pt.tensor(mu_sig[:,0], device=self.device)
             self.sig = pt.tensor(mu_sig[:,1], device=self.device)
 
-    def __calc_2d_grid_auto(self, cell_resolution, max_min, X):
+    def __calc_2d_grid_auto(self, cell_resolution, max_min, X, offset_grid=False):
         """
         :param X: a sample of lidar locations
         :param cell_resolution: resolution to hinge RBFs as (x_resolution, y_resolution)
@@ -96,15 +96,22 @@ class BHM_PYTORCH():
             x_min, x_max = x_min - x_expansion, x_max + x_expansion
             y_min, y_max = y_min - y_expansion, y_max + y_expansion
         else:
-            x_min, x_max = max_min[0], max_min[1]
-            y_min, y_max = max_min[2], max_min[3]
+            x_min, x_max = max_min[0][0], max_min[0][1]
+            y_min, y_max = max_min[1][0], max_min[1][1]
 
-        xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max + cell_resolution[0], cell_resolution[0], device=self.device),
+        xx, yy = pt.meshgrid([pt.arange(x_min, x_max + cell_resolution[0], cell_resolution[0], device=self.device),
                               pt.arange(y_min, y_max + cell_resolution[1], cell_resolution[1], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1)), dim=1).squeeze()
+
+        if offset_grid:         
+            xx2, yy2, zz2 = pt.meshgrid([pt.arange(x_min + cell_resolution[0]/2, x_max, cell_resolution[0], device=self.device),
+                                pt.arange(y_min + cell_resolution[1]/2, y_max, cell_resolution[1], device=self.device)], indexing="ij")  
+            grid2 = pt.stack((xx2.reshape(-1,1), yy2.reshape(-1,1)), dim=1).squeeze()
+            grid = pt.cat((grid, grid2))
+
         return grid
     
-    def __calc_3d_grid_auto(self, cell_resolution, max_min, X):
+    def __calc_3d_grid_auto(self, cell_resolution, max_min, X, offset_grid=False):
         """
         :param X: a sample of lidar locations
         :param cell_resolution: resolution to hinge RBFs as (x_resolution, y_resolution)
@@ -129,16 +136,24 @@ class BHM_PYTORCH():
             y_min, y_max = y_min - y_expansion, y_max + y_expansion + 1
             z_min, z_max = z_min - z_expansion, z_max + z_expansion + 1
         else:
-            x_min, x_max = max_min[0], max_min[1]
-            y_min, y_max = max_min[2], max_min[3]
-            z_min, z_max = max_min[4], max_min[5]
+            x_min, x_max = max_min[0][0], max_min[0][1]
+            y_min, y_max = max_min[1][0], max_min[1][1]
+            z_min, z_max = max_min[2][0], max_min[2][1]
 
         print(f"grid points x: {x_min} {x_max} y: {y_min} {y_max} z: {z_min} {z_max}")
 
         xx, yy, zz = pt.meshgrid([pt.arange(x_min, x_max + cell_resolution[0], cell_resolution[0], device=self.device),
-                              pt.arange(y_min, y_max + cell_resolution[1], cell_resolution[1], device=self.device),
-                              pt.arange(z_min, z_max + cell_resolution[2], cell_resolution[2], device=self.device)], indexing="ij")
+                            pt.arange(y_min, y_max + cell_resolution[1], cell_resolution[1], device=self.device),
+                            pt.arange(z_min, z_max + cell_resolution[2], cell_resolution[2], device=self.device)], indexing="ij")
         grid = pt.stack((xx.reshape(-1,1), yy.reshape(-1,1), zz.reshape(-1,1)), dim=1).squeeze()
+
+        if offset_grid:         
+            xx2, yy2, zz2 = pt.meshgrid([pt.arange(x_min + cell_resolution[0]/2, x_max, cell_resolution[0], device=self.device),
+                                pt.arange(y_min + cell_resolution[1]/2, y_max, cell_resolution[1], device=self.device),
+                                pt.arange(z_min + cell_resolution[2]/2, z_max, cell_resolution[2], device=self.device)], indexing="ij")  
+            grid2 = pt.stack((xx2.reshape(-1,1), yy2.reshape(-1,1), zz2.reshape(-1,1)), dim=1).squeeze()
+            grid = pt.cat((grid, grid2))
+
         return grid
 
     def __sparse_features(self, X):
@@ -225,7 +240,7 @@ class BHM_PYTORCH():
         prob_Xq = 1. - self.predict(Xq)
         return pt.log(prob_Xq)
 
-    def grad_log_p_vacancy(self, Xq):
+    def grad_log_p_vacancy(self, Xq, sub_limits=True):
         """
         :param Xq: raw in query points
         """
@@ -242,7 +257,7 @@ class BHM_PYTORCH():
         log_p = pt.log(1. - pt.sigmoid(k * mu_a))
 
         # TODO: add the limits alterations to log_p calculations?
-        if self.limits is not None:
+        if self.limits is not None and sub_limits:
             # print(self.limits[0][0])
             # print(Xq[0,0])
             print_str = f"log_p: {log_p[0]:5.6f}"
@@ -267,13 +282,36 @@ class BHM_PYTORCH():
 
         return dlog_p_dXq.squeeze(1)
 
+    def numerical_grad_log_p(self, Xq, sub_limits=True):
+        log_p = self.log_prob_vacancy(Xq)
+        # TODO: add the limits alterations to log_p calculations?
+        if self.limits is not None and sub_limits:
+            # print(self.limits[0][0])
+            # print(Xq[0,0])
+            print_str = f"log_p: {log_p[0]:5.6f}"
+
+            log_p_diff = pt.exp(-self.limit_scale*(Xq[:, 0] - self.limits[0][0]))
+            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 0] - self.limits[0][1]))
+            log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 1] - self.limits[1][0]))
+            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 1] - self.limits[1][1]))
+            if len(self.limits) > 2:
+                log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 2] - self.limits[2][0]))
+                log_p_diff += pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1]))            
+            print(print_str + f" diff: {log_p_diff[0]:5.6f} new log_p: {log_p[0] - log_p_diff[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}")
+            log_p -= log_p_diff
+        else:
+            print(f"log_p: {log_p[0]:5.6f}")
+
+        dlog_p = pt.autograd.grad(log_p.sum(), Xq, create_graph=True,)[0]
+        return dlog_p        
+
     def predict(self, Xq):
         """
         :param Xq: raw in query points
         :return: mean occupancy (Laplace approximation)
         """
         Xq = self.__sparse_features(Xq)
-
+        print(f"Xq: {Xq.dtype} mu: {self.mu.dtype}")
         mu_a = Xq.mm(self.mu.reshape(-1, 1)).squeeze()
         sig2_inv_a = pt.sum((Xq ** 2) * self.sig, dim=1)
         k = 1.0 / pt.sqrt(1 + np.pi * sig2_inv_a / 8)
@@ -298,3 +336,10 @@ class BHM_PYTORCH():
         std = pt.std(probs, dim=1).squeeze()
 
         return mean, std
+    
+    def calc_plotting_grid(self, resolution, max_min):
+        if len(max_min) > 2:
+            points = self.__calc_3d_grid_auto((resolution, resolution, resolution), max_min, None)
+        else:
+            points = self.__calc_2d_grid_auto((resolution, resolution), max_min, None)
+        return points
