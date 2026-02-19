@@ -261,6 +261,7 @@ class BHM_PYTORCH():
             # print(self.limits[0][0])
             # print(Xq[0,0])
             print_str = f"log_p: {log_p[0]:5.6f}"
+            z_str = ""
 
             log_p_diff = pt.exp(-self.limit_scale*(Xq[:, 0] - self.limits[0][0]))
             log_p_diff += pt.exp( self.limit_scale*(Xq[:, 0] - self.limits[0][1]))
@@ -268,11 +269,12 @@ class BHM_PYTORCH():
             log_p_diff += pt.exp( self.limit_scale*(Xq[:, 1] - self.limits[1][1]))
             if len(self.limits) > 2:
                 log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 2] - self.limits[2][0]))
-                log_p_diff += pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1]))            
-            print(print_str + f" diff: {log_p_diff[0]:5.6f} new log_p: {log_p[0] - log_p_diff[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}")
+                log_p_diff += pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1])) 
+                z_str = f" z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}"           
+            print(print_str + f" diff: {log_p_diff[0]:5.6f} new log_p: {log_p[0] - log_p_diff[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} {z_str}")
             log_p -= log_p_diff
         else:
-            print(f"log_p: {log_p[0]:5.6f}")
+            print(f"log_p: {log_p[0]:5.6f} limits: {self.limits} sub lim: {sub_limits} test: {self.limits is not None and sub_limits}")
 
         # Autodiff second term.
         dlog_p_dK = pt.autograd.grad(log_p.sum(), K,)[0] # batch x rbf_features
