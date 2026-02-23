@@ -5,7 +5,7 @@
 import torch as pt
 import numpy as np
 from sklearn.metrics.pairwise import rbf_kernel
-import matplotlib.pyplot as pl
+import matplotlib.pyplot as plt
 from pathlib import Path
 from mpl_toolkits.mplot3d import Axes3D
 import time
@@ -256,31 +256,65 @@ class BHM_PYTORCH():
         k = 1.0 / pt.sqrt(1 + np.pi * sig2_inv_a / 8)
         log_p = pt.log(1. - pt.sigmoid(k * mu_a))
 
-        # TODO: add the limits alterations to log_p calculations?
-        if self.limits is not None and sub_limits:
-            # print(self.limits[0][0])
-            # print(Xq[0,0])
-            print_str = f"log_p: {log_p[0]:5.6f}"
-
-            log_p_diff = pt.exp(-self.limit_scale*(Xq[:, 0] - self.limits[0][0]))
-            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 0] - self.limits[0][1]))
-            log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 1] - self.limits[1][0]))
-            log_p_diff += pt.exp( self.limit_scale*(Xq[:, 1] - self.limits[1][1]))
-            if len(self.limits) > 2:
-                log_p_diff += pt.exp(-self.limit_scale*(Xq[:, 2] - self.limits[2][0]))
-                log_p_diff += pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1]))            
-            print(print_str + f" diff: {log_p_diff[0]:5.6f} new log_p: {log_p[0] - log_p_diff[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}")
-            log_p -= log_p_diff
-        else:
-            print(f"log_p: {log_p[0]:5.6f}")
-
         # Autodiff second term.
-        dlog_p_dK = pt.autograd.grad(log_p.sum(), K,)[0] # batch x rbf_features
+        dlog_p_dK = pt.autograd.grad(log_p.sum(), K, create_graph=True)[0] # batch x rbf_features
 
         # Chain rule gradients
         dlog_p_dXq = dlog_p_dK.unsqueeze(1) @ dK_dXq
 
+        if self.limits is not None and sub_limits:
+            # print(self.limits[0][0])
+            # print(Xq[0,0])
+            print_str = f"log_p: {log_p[0]:5.6f}"
+            z_str = ""
+            log_p_diff = -pt.exp(-self.limit_scale*(Xq[:, 0] - self.limits[0][0]))
+            log_p_diff -= pt.exp( self.limit_scale*(Xq[:, 0] - self.limits[0][1]))
+            log_p_diff -= pt.exp(-self.limit_scale*(Xq[:, 1] - self.limits[1][0]))
+            log_p_diff -= pt.exp( self.limit_scale*(Xq[:, 1] - self.limits[1][1]))
+            if len(self.limits) > 2:
+                log_p_diff -= pt.exp(-self.limit_scale*(Xq[:, 2] - self.limits[2][0]))
+                log_p_diff -= pt.exp( self.limit_scale*(Xq[:, 2] - self.limits[2][1]))
+                z_str = f"z: {Xq[0,2] - self.limits[2][0]:5.6f} {Xq[0,2] - self.limits[2][1]:5.6f}"
+            
+            # log_p -= log_p_diff
+            # Xq.requires_grad = True # TODO: see if this is needed
+            limit_locs = pt.where(log_p_diff < -0.1)[0]
+            print(print_str + f" new log_p: {log_p[0]:5.6f}  x: {Xq[0,0] - self.limits[0][0]:5.6f} {Xq[0,0] - self.limits[0][1]:5.6f} y: {Xq[0,1] - self.limits[1][0]:5.6f} {Xq[0,1] - self.limits[1][1]:5.6f} {z_str} far points: {limit_locs.size()}")
+            # print(log_p_diff[limit_locs])
+            # print(log_p[limit_locs])
+            # print(Xq[limit_locs,:])
+            d_log_p_diff_dXq = pt.autograd.grad(log_p_diff.sum(), Xq, create_graph=True)[0]
+            # print(d_log_p_diff_dXq[limit_locs,:])
+            # print(dlog_p_dXq[limit_locs,:])
+            dlog_p_dXq = dlog_p_dXq - d_log_p_diff_dXq.unsqueeze(1)
+            # print(dlog_p_dXq[limit_locs,:])
+            # self.__plot_grads(Xq, log_p, sub_limits, dlog_p_dXq, ddiff_dXq=d_log_p_diff_dXq)
+        else:
+            print(f"log_p: {log_p[0]:5.6f}")
+
         return dlog_p_dXq.squeeze(1)
+
+    def __plot_grads(self, Xq, log_p, sub_limits, dlog_p_dXq, ddiff_dXq=None):
+        fig = plt.figure(figsize=(15,15))
+
+        ax = fig.add_subplot(projection='3d')
+        Xq = Xq.detach().cpu().numpy()
+        log_p = log_p.detach().cpu().numpy()
+        dlog_p_dXq = dlog_p_dXq.squeeze(1).detach().cpu().numpy()
+        dlog_p_dXq = 50*dlog_p_dXq/np.linalg.norm(dlog_p_dXq)
+        print(np.shape(dlog_p_dXq))
+        ax.scatter(Xq[:,0], Xq[:,1], Xq[:,2], c=log_p, vmin=-5, vmax=0, cmap='plasma', s=10)
+        ax.quiver(Xq[:,0], Xq[:,1], Xq[:,2], dlog_p_dXq[:,0], dlog_p_dXq[:,1], dlog_p_dXq[:,2], colors=(0,0,0))
+        if sub_limits and ddiff_dXq is not None:
+            ddiff_dXq = ddiff_dXq.detach().cpu().numpy()
+            ddiff_dXq = 50*ddiff_dXq/np.linalg.norm(ddiff_dXq)
+            ax.quiver(Xq[:,0], Xq[:,1], Xq[:,2], ddiff_dXq[:,0], ddiff_dXq[:,1], ddiff_dXq[:,2], colors=(1,0,0))
+        ax.set_xlim(self.limits[0][0], self.limits[0][0] + 20)
+        ax.set_ylim(self.limits[1][0], self.limits[1][0] + 20)
+        ax.set_zlim(self.limits[2][0], self.limits[2][0] + 20)
+        plt.show()
+
+
 
     def numerical_grad_log_p(self, Xq, sub_limits=True):
         log_p = self.log_prob_vacancy(Xq)
@@ -311,7 +345,7 @@ class BHM_PYTORCH():
         :return: mean occupancy (Laplace approximation)
         """
         Xq = self.__sparse_features(Xq)
-        print(f"Xq: {Xq.dtype} mu: {self.mu.dtype}")
+        # print(f"Xq: {Xq.dtype} mu: {self.mu.dtype}")
         mu_a = Xq.mm(self.mu.reshape(-1, 1)).squeeze()
         sig2_inv_a = pt.sum((Xq ** 2) * self.sig, dim=1)
         k = 1.0 / pt.sqrt(1 + np.pi * sig2_inv_a / 8)
